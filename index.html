@@ -16,7 +16,7 @@
 import * as THREE from 'https://esm.sh/three@0.165.0'
 import { GLTFLoader } from 'https://esm.sh/three@0.165.0/examples/jsm/loaders/GLTFLoader'
 
-const GLB = 'https://raw.githubusercontent.com/EzekielTeAwa/key_test_compressed.glb/main/Key_Test_2_compressed.glb'
+const GLB = 'https://raw.githubusercontent.com/EzekielTeAwa/key_test_compressed.glb/main/Key_Test_compressed.glb'
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
@@ -131,19 +131,25 @@ renderer.setAnimationLoop(() => {
   const tz = tgt.z * (Math.PI / 180)
   const tx = tgt.x * (Math.PI / 180)
 
-  // Rotate each part by a different spring amount
-  // Carabiner barely moves, ring medium, badge most
+  // Cascade: each part reacts to the one above it, not raw drag
+  // This creates the chain effect — badge reacts to ring, ring reacts to carabiner
   if (caribiner) {
-    caribiner.rotation.z = tickSpring(springs.caribiner.z, tz * 0.1, dt)
-    caribiner.rotation.x = tickSpring(springs.caribiner.x, tx * 0.1, dt)
+    caribiner.rotation.z = tickSpring(springs.caribiner.z, tz * 0.3, dt)
+    caribiner.rotation.x = tickSpring(springs.caribiner.x, tx * 0.2, dt)
   }
   if (ring) {
-    ring.rotation.z = tickSpring(springs.ring.z, tz * 0.5, dt)
-    ring.rotation.x = tickSpring(springs.ring.x, tx * 0.4, dt)
+    // Ring target = where carabiner actually is * amplifier
+    const ringTargetZ = caribiner ? caribiner.rotation.z * 1.8 : tz
+    const ringTargetX = caribiner ? caribiner.rotation.x * 1.5 : tx
+    ring.rotation.z = tickSpring(springs.ring.z, ringTargetZ, dt)
+    ring.rotation.x = tickSpring(springs.ring.x, ringTargetX, dt)
   }
   if (badge) {
-    badge.rotation.z = tickSpring(springs.badge.z, tz * 1.0, dt)
-    badge.rotation.x = tickSpring(springs.badge.x, tx * 0.85, dt)
+    // Badge target = where ring actually is * amplifier — lags the most
+    const badgeTargetZ = ring ? ring.rotation.z * 1.6 : tz
+    const badgeTargetX = ring ? ring.rotation.x * 1.4 : tx
+    badge.rotation.z = tickSpring(springs.badge.z, badgeTargetZ, dt)
+    badge.rotation.x = tickSpring(springs.badge.x, badgeTargetX, dt)
   }
 
   renderer.render(scene, camera)
