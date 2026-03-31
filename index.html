@@ -18,7 +18,6 @@ import { GLTFLoader } from 'https://esm.sh/three@0.165.0/examples/jsm/loaders/GL
 
 const GLB = 'https://raw.githubusercontent.com/EzekielTeAwa/key_test_compressed.glb/main/Key_Test_compressed.glb'
 
-// ── Renderer ──────────────────────────────────────────────────────────────────
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
 renderer.setSize(innerWidth, innerHeight)
@@ -29,7 +28,6 @@ const scene  = new THREE.Scene()
 const camera = new THREE.PerspectiveCamera(36, innerWidth / innerHeight, 0.01, 100)
 camera.position.z = 5
 
-// ── Lights ────────────────────────────────────────────────────────────────────
 scene.add(new THREE.AmbientLight(0xffffff, 1.0))
 const sun = new THREE.DirectionalLight(0xffffff, 1.6)
 sun.position.set(3, 5, 4)
@@ -38,53 +36,40 @@ const fill = new THREE.DirectionalLight(0xffffff, 0.4)
 fill.position.set(-3, -2, -3)
 scene.add(fill)
 
-// ── Spring helper ─────────────────────────────────────────────────────────────
-// Simple damped spring: returns [newValue, newVelocity]
-function springStep(val, vel, target, tension, damping, dt) {
+// ── Spring ────────────────────────────────────────────────────────────────────
+function makeSpring(tension, damping) {
+  return { val: 0, vel: 0, tension, damping }
+}
+function tickSpring(s, target, dt) {
   dt = Math.min(dt, 0.05)
-  vel += (target - val) * tension * dt
-  vel *= Math.exp(-damping * dt)
-  val += vel * dt
-  return [val, vel]
+  s.vel += (target - s.val) * s.tension * dt
+  s.vel *= Math.exp(-s.damping * dt)
+  s.val += s.vel * dt
+  return s.val
 }
 
-// ── Physics groups (hierarchy: scene → carabinerPivot → ringPivot → badgePivot)
-// Each pivot rotates independently with its own spring
-const carabinerPivot = new THREE.Group()
-const ringPivot      = new THREE.Group()
-const badgePivot     = new THREE.Group()
+// ── Objects to animate (set after load) ──────────────────────────────────────
+let caribiner = null, ring = null, badge = null
 
-scene.add(carabinerPivot)
-carabinerPivot.add(ringPivot)
-ringPivot.add(badgePivot)
-
-// Spring state per pivot [value, velocity] for Z and X axes
-const sp = {
-  c: { z: [0,0], x: [0,0] },  // carabiner - stiffest
-  r: { z: [0,0], x: [0,0] },  // ring - medium
-  b: { z: [0,0], x: [0,0] },  // badge - loosest
+// Each part gets Z and X springs with different stiffness
+// Carabiner = stiffest, badge = loosest
+const springs = {
+  caribiner: { z: makeSpring(20, 9), x: makeSpring(20, 9) },
+  ring:      { z: makeSpring(10, 6), x: makeSpring(10, 6) },
+  badge:     { z: makeSpring( 4, 3), x: makeSpring( 4, 3) },
 }
 
-// Physics config
-const cfg = {
-  c: { tension: 18, damping: 7  },
-  r: { tension: 10, damping: 5  },
-  b: { tension:  5, damping: 3.5},
-}
-
-// Current drag target in degrees
 const tgt = { z: 0, x: 0 }
 
-// ── Load GLB ──────────────────────────────────────────────────────────────────
+// ── Load ──────────────────────────────────────────────────────────────────────
 new GLTFLoader().load(GLB, gltf => {
   const model = gltf.scene
 
-  // Enable shadows on all meshes
   model.traverse(o => {
     if (o.isMesh) { o.castShadow = true; o.receiveShadow = true }
   })
 
-  // Fit model: scale so height = 3.5 units
+  // Scale to fit
   const box    = new THREE.Box3().setFromObject(model)
   const size   = box.getSize(new THREE.Vector3())
   const centre = box.getCenter(new THREE.Vector3())
@@ -92,32 +77,14 @@ new GLTFLoader().load(GLB, gltf => {
   model.scale.setScalar(s)
   model.position.copy(centre.clone().multiplyScalar(-s))
 
-  // Find named top-level objects inside the model
-  let caribiner = model.getObjectByName('Caribiner')
-  let ring      = model.getObjectByName('Ring')
-  let badge     = model.getObjectByName('badge_41')
+  scene.add(model)
 
-  if (caribiner && ring && badge) {
-    // Attach each to its physics pivot preserving world transform
-    carabinerPivot.attach(caribiner)
-    ringPivot.attach(ring)
-    badgePivot.attach(badge)
+  // Find the 3 parts — leave them exactly where they are
+  caribiner = model.getObjectByName('Caribiner')
+  ring      = model.getObjectByName('Ring')
+  badge     = model.getObjectByName('badge_41')
 
-    // Set pivot Y positions so rotation feels like a pendulum
-    // Ring pivot sits at the top of the ring bounding box
-    const ringBox  = new THREE.Box3().setFromObject(ring)
-    const badgeBox = new THREE.Box3().setFromObject(badge)
-
-    ringPivot.position.y  = ringBox.max.y
-    badgePivot.position.y = badgeBox.max.y
-
-    console.log('✓ 3 parts found — independent physics active')
-  } else {
-    // Fallback: whole model swings as one
-    carabinerPivot.add(model)
-    console.warn('Named meshes not found — swinging as one piece')
-    console.log('Available names:', [...new Set([...Array.from({length: 50}, (_, i) => model.children[i]?.name).filter(Boolean)])])
-  }
+  console.log('Caribiner:', caribiner?.name, 'Ring:', ring?.name, 'Badge:', badge?.name)
 })
 
 // ── Drag ─────────────────────────────────────────────────────────────────────
@@ -129,7 +96,6 @@ el.addEventListener('pointerdown', e => {
   velX = velY = 0
   el.setPointerCapture(e.pointerId)
 })
-
 el.addEventListener('pointermove', e => {
   if (!dragging) return
   velX = e.clientX - lastX
@@ -138,13 +104,11 @@ el.addEventListener('pointermove', e => {
   tgt.z = Math.max(-42, Math.min(42, tgt.z + velX * 0.28))
   tgt.x = Math.max(-18, Math.min(18, tgt.x + velY * 0.12))
 })
-
 el.addEventListener('pointerup', () => {
   tgt.z = Math.max(-42, Math.min(42, tgt.z + velX * 0.5))
   dragging = false
 })
 
-// ── Resize ────────────────────────────────────────────────────────────────────
 window.addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight
   camera.updateProjectionMatrix()
@@ -158,7 +122,6 @@ let idle = 0
 renderer.setAnimationLoop(() => {
   const dt = clock.getDelta()
 
-  // Idle sway when not dragging
   if (!dragging) {
     idle += dt
     tgt.z += (Math.sin(idle * 0.55) * 2.5 - tgt.z) * 0.016
@@ -168,18 +131,20 @@ renderer.setAnimationLoop(() => {
   const tz = tgt.z * (Math.PI / 180)
   const tx = tgt.x * (Math.PI / 180)
 
-  // Step each spring toward its target (cascade: each part lags the one above)
-  ;[sp.c.z[0], sp.c.z[1]] = springStep(...sp.c.z, tz * 0.15, cfg.c.tension, cfg.c.damping, dt)
-  ;[sp.r.z[0], sp.r.z[1]] = springStep(...sp.r.z, tz * 0.60, cfg.r.tension, cfg.r.damping, dt)
-  ;[sp.r.x[0], sp.r.x[1]] = springStep(...sp.r.x, tx * 0.40, cfg.r.tension, cfg.r.damping, dt)
-  ;[sp.b.z[0], sp.b.z[1]] = springStep(...sp.b.z, tz * 1.00, cfg.b.tension, cfg.b.damping, dt)
-  ;[sp.b.x[0], sp.b.x[1]] = springStep(...sp.b.x, tx * 0.85, cfg.b.tension, cfg.b.damping, dt)
-
-  carabinerPivot.rotation.z = sp.c.z[0]
-  ringPivot.rotation.z      = sp.r.z[0]
-  ringPivot.rotation.x      = sp.r.x[0]
-  badgePivot.rotation.z     = sp.b.z[0]
-  badgePivot.rotation.x     = sp.b.x[0]
+  // Rotate each part by a different spring amount
+  // Carabiner barely moves, ring medium, badge most
+  if (caribiner) {
+    caribiner.rotation.z = tickSpring(springs.caribiner.z, tz * 0.1, dt)
+    caribiner.rotation.x = tickSpring(springs.caribiner.x, tx * 0.1, dt)
+  }
+  if (ring) {
+    ring.rotation.z = tickSpring(springs.ring.z, tz * 0.5, dt)
+    ring.rotation.x = tickSpring(springs.ring.x, tx * 0.4, dt)
+  }
+  if (badge) {
+    badge.rotation.z = tickSpring(springs.badge.z, tz * 1.0, dt)
+    badge.rotation.x = tickSpring(springs.badge.x, tx * 0.85, dt)
+  }
 
   renderer.render(scene, camera)
 })
