@@ -5,252 +5,117 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Keychain</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    * { margin: 0; padding: 0; }
     html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; }
-    canvas { display: block; }
-    #hint {
-      position: fixed;
-      bottom: 16px;
-      left: 50%;
-      transform: translateX(-50%);
-      color: rgba(255,255,255,0.35);
-      font: 11px/1 system-ui, sans-serif;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      pointer-events: none;
-      transition: opacity 1s;
-    }
+    canvas { display: block; cursor: grab; }
+    canvas:active { cursor: grabbing; }
   </style>
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
-    }
-  }
-  </script>
 </head>
 <body>
-<div id="hint">drag to jiggle</div>
 <script type="module">
-import * as THREE from 'three'
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+  import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js'
+  import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/loaders/GLTFLoader.js'
 
-const GLB_URL = 'https://raw.githubusercontent.com/EzekielTeAwa/key_test_compressed.glb/main/Key_Test_compressed.glb'
+  const GLB = 'https://raw.githubusercontent.com/EzekielTeAwa/key_test_compressed.glb/main/Key_Test_compressed.glb'
 
-// ── Renderer ──────────────────────────────────────────────────────────────────
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-renderer.setSize(window.innerWidth, window.innerHeight)
-renderer.shadowMap.enabled = true
-renderer.shadowMap.type = THREE.PCFSoftShadowMap
-renderer.setClearColor(0x000000, 0)
-document.body.appendChild(renderer.domElement)
+  // Scene
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
+  renderer.setSize(innerWidth, innerHeight)
+  document.body.appendChild(renderer.domElement)
 
-const scene = new THREE.Scene()
-const camera = new THREE.PerspectiveCamera(38, window.innerWidth / window.innerHeight, 0.001, 1000)
+  const scene  = new THREE.Scene()
+  const camera = new THREE.PerspectiveCamera(36, innerWidth / innerHeight, 0.01, 100)
+  camera.position.z = 5
 
-// ── Lights ────────────────────────────────────────────────────────────────────
-scene.add(new THREE.AmbientLight(0xffffff, 0.8))
-const key = new THREE.DirectionalLight(0xffffff, 1.5)
-key.position.set(3, 5, 4)
-key.castShadow = true
-scene.add(key)
-const fill = new THREE.DirectionalLight(0xffffff, 0.4)
-fill.position.set(-4, 2, -3)
-scene.add(fill)
-const rim = new THREE.DirectionalLight(0xffffff, 0.25)
-rim.position.set(0, -4, -4)
-scene.add(rim)
+  // Lights
+  scene.add(new THREE.AmbientLight(0xffffff, 1.0))
+  const sun = new THREE.DirectionalLight(0xffffff, 1.5)
+  sun.position.set(3, 5, 4)
+  scene.add(sun)
+  const fill = new THREE.DirectionalLight(0xffffff, 0.5)
+  fill.position.set(-3, -2, -3)
+  scene.add(fill)
 
-// ── Spring helper ─────────────────────────────────────────────────────────────
-function spring(tension, friction) {
-  return { v: 0, x: 0, tension, friction }
-}
-function tick(s, target, dt) {
-  dt = Math.min(dt, 0.05)
-  s.v += (target - s.x) * s.tension * dt
-  s.v *= Math.exp(-s.friction * dt)
-  s.x += s.v * dt
-  return s.x
-}
+  // Model pivot
+  const pivot = new THREE.Group()
+  scene.add(pivot)
 
-// ── Physics state ─────────────────────────────────────────────────────────────
-// Three pivot groups stacked in hierarchy
-// rootPivot → carabinerPivot → ringPivot → badgePivot
-const rootPivot      = new THREE.Group()
-const carabinerPivot = new THREE.Group()
-const ringPivot      = new THREE.Group()
-const badgePivot     = new THREE.Group()
-
-scene.add(rootPivot)
-rootPivot.add(carabinerPivot)
-carabinerPivot.add(ringPivot)
-ringPivot.add(badgePivot)
-
-const sp = {
-  body:  { z: spring(5,  4.5) },
-  ring:  { z: spring(9,  5.0), x: spring(5, 4.5) },
-  badge: { z: spring(4,  3.5), x: spring(3, 3.5) },
-}
-
-// Drag target
-const tgt = { z: 0, x: 0 }
-
-// ── Load model ────────────────────────────────────────────────────────────────
-const loader = new GLTFLoader()
-
-loader.load(GLB_URL, (gltf) => {
-  const model = gltf.scene
-
-  // Fit model to view
-  const box = new THREE.Box3().setFromObject(model)
-  const size = box.getSize(new THREE.Vector3())
-  const centre = box.getCenter(new THREE.Vector3())
-  const maxDim = Math.max(size.x, size.y, size.z)
-
-  // Scale so model fills ~70% of view height
-  const vFov = camera.fov * Math.PI / 180
-  const viewH = 2 * Math.tan(vFov / 2) * 5  // at z=5
-  const desiredH = viewH * 0.75
-  const scaleFactor = desiredH / size.y
-  model.scale.setScalar(scaleFactor)
-
-  // Recentre
-  box.setFromObject(model)
-  box.getCenter(centre)
-  model.position.sub(centre)
-
-  // Raise slightly so it hangs from top area
-  const box2 = new THREE.Box3().setFromObject(model)
-  model.position.y -= box2.min.y * 0.1
-
-  // Find named objects
-  let caribiner = null, ring = null, badge = null
-  model.traverse(o => {
-    if (o.name === 'Caribiner') caribiner = o
-    if (o.name === 'Ring') ring = o
-    if (o.name === 'badge_41') badge = o
-    if (o.isMesh) {
-      o.castShadow = true
-      o.receiveShadow = true
-    }
+  new GLTFLoader().load(GLB, gltf => {
+    const model = gltf.scene
+    // Fit to screen
+    const box    = new THREE.Box3().setFromObject(model)
+    const size   = box.getSize(new THREE.Vector3())
+    const centre = box.getCenter(new THREE.Vector3())
+    const scale  = 3.5 / size.y
+    model.scale.setScalar(scale)
+    model.position.copy(centre.multiplyScalar(-scale))
+    pivot.add(model)
   })
 
-  // Strategy: instead of detaching meshes (breaks materials),
-  // we measure world positions of each part and create pivot groups
-  // at their centres, then reparent into our physics hierarchy.
+  // Drag + spring state
+  let dragging = false, lastX = 0, velX = 0
+  let rotY = 0, rotYSpring = 0, rotYVel = 0  // horizontal spin
+  let wobble = 0, wobbleVel = 0               // Z wobble on flick
+  let idle = 0
 
-  function getPivotY(obj) {
-    if (!obj) return 0
-    const b = new THREE.Box3().setFromObject(obj)
-    return b.getCenter(new THREE.Vector3()).y
+  const el = renderer.domElement
+
+  el.addEventListener('pointerdown', e => {
+    dragging = true; lastX = e.clientX; velX = 0
+    el.setPointerCapture(e.pointerId)
+  })
+
+  el.addEventListener('pointermove', e => {
+    if (!dragging) return
+    const dx = e.clientX - lastX
+    velX = dx
+    rotY += dx * 0.6   // degrees
+    lastX = e.clientX
+  })
+
+  el.addEventListener('pointerup', () => {
+    // Flick: transfer drag velocity into wobble
+    wobbleVel += velX * 0.08
+    dragging = false
+  })
+
+  window.addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight
+    camera.updateProjectionMatrix()
+    renderer.setSize(innerWidth, innerHeight)
+  })
+
+  // Spring fn
+  function spring(current, vel, target, tension, friction, dt) {
+    vel += (target - current) * tension * dt
+    vel *= Math.exp(-friction * dt)
+    current += vel * dt
+    return [current, vel]
   }
 
-  if (caribiner && ring && badge) {
-    // Get world Y centres before any reparenting
-    const caribY = getPivotY(caribiner)
-    const ringY  = getPivotY(ring)
-    const badgeY = getPivotY(badge)
+  const clock = new THREE.Clock()
 
-    // Detach from model, add to physics pivots
-    // Preserve world transform
-    carabinerPivot.attach(caribiner)
-    ringPivot.attach(ring)
-    badgePivot.attach(badge)
+  renderer.setAnimationLoop(() => {
+    const dt = Math.min(clock.getDelta(), 0.05)
 
-    // Set pivot positions so rotations feel natural
-    // Ring pivots from where it meets the carabiner gate
-    const ringBox = new THREE.Box3().setFromObject(ring)
-    ringPivot.position.y = ringBox.max.y
+    // Idle sway
+    if (!dragging) {
+      idle += dt
+      rotY += Math.sin(idle * 0.5) * 0.15
+    }
 
-    // Badge pivots from where it meets the ring
-    const badgeBox = new THREE.Box3().setFromObject(badge)
-    badgePivot.position.y = badgeBox.max.y
+    // Spring rotY toward 0 when not dragging (gentle return)
+    ;[rotYSpring, rotYVel] = spring(rotYSpring, rotYVel, rotY * 0.15, 3, 3.5, dt)
 
-  } else {
-    // Fallback: add whole model, animate as one piece
-    console.warn('Named meshes not found, using full model')
-    carabinerPivot.add(model)
-  }
+    // Wobble spring back to 0
+    ;[wobble, wobbleVel] = spring(wobble, wobbleVel, 0, 4, 3.2, dt)
 
-  // Position camera to frame it
-  camera.position.set(0, 0, 5)
+    pivot.rotation.y = rotYSpring * (Math.PI / 180)
+    pivot.rotation.z = wobble * (Math.PI / 180)
 
-  // Fade out hint
-  setTimeout(() => {
-    document.getElementById('hint').style.opacity = '0'
-  }, 2500)
-
-}, undefined, err => {
-  console.error('Load error:', err)
-})
-
-// ── Interaction ───────────────────────────────────────────────────────────────
-const el = renderer.domElement
-const drag = { on: false, lx: 0, ly: 0, vx: 0, vy: 0 }
-
-el.style.cursor = 'grab'
-
-el.addEventListener('pointerdown', e => {
-  drag.on = true
-  drag.lx = e.clientX
-  drag.ly = e.clientY
-  drag.vx = drag.vy = 0
-  el.style.cursor = 'grabbing'
-  el.setPointerCapture(e.pointerId)
-})
-
-el.addEventListener('pointermove', e => {
-  if (!drag.on) return
-  const dx = e.clientX - drag.lx
-  const dy = e.clientY - drag.ly
-  drag.vx = dx
-  drag.vy = dy
-  drag.lx = e.clientX
-  drag.ly = e.clientY
-  tgt.z = Math.max(-40, Math.min(40, tgt.z + dx * 0.25))
-  tgt.x = Math.max(-18, Math.min(18, tgt.x + dy * 0.12))
-})
-
-el.addEventListener('pointerup', e => {
-  tgt.z = Math.max(-40, Math.min(40, tgt.z + drag.vx * 0.5))
-  drag.on = false
-  el.style.cursor = 'grab'
-})
-
-// ── Resize ────────────────────────────────────────────────────────────────────
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight
-  camera.updateProjectionMatrix()
-  renderer.setSize(window.innerWidth, window.innerHeight)
-})
-
-// ── Loop ──────────────────────────────────────────────────────────────────────
-const clock = new THREE.Clock()
-let idle = 0
-
-renderer.setAnimationLoop(() => {
-  const dt = clock.getDelta()
-
-  if (!drag.on) {
-    idle += dt
-    const sway = Math.sin(idle * 0.55) * 2.2
-    tgt.z += (sway - tgt.z) * 0.016
-    tgt.x += (0    - tgt.x) * 0.03
-  }
-
-  const tz = tgt.z * (Math.PI / 180)
-  const tx = tgt.x * (Math.PI / 180)
-
-  carabinerPivot.rotation.z = tick(sp.body.z,  tz * 0.18,  dt)
-  ringPivot.rotation.z      = tick(sp.ring.z,  tz * 0.62,  dt)
-  ringPivot.rotation.x      = tick(sp.ring.x,  tx * 0.38,  dt)
-  badgePivot.rotation.z     = tick(sp.badge.z, tz * 1.0,   dt)
-  badgePivot.rotation.x     = tick(sp.badge.x, tx * 0.85,  dt)
-
-  renderer.render(scene, camera)
-})
+    renderer.render(scene, camera)
+  })
 </script>
 </body>
 </html>
