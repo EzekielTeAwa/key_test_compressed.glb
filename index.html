@@ -34,7 +34,9 @@ scene.add(new THREE.AmbientLight(0xffffff, 1.0))
 const sun = new THREE.DirectionalLight(0xffffff, 1.6)
 sun.position.set(3, 5, 4)
 scene.add(sun)
-scene.add(Object.assign(new THREE.DirectionalLight(0xffffff, 0.4), { position: new THREE.Vector3(-3, -2, -3) }))
+const fill = new THREE.DirectionalLight(0xffffff, 0.4)
+fill.position.set(-3, -2, -3)
+scene.add(fill)
 
 // ── Spring helper ─────────────────────────────────────────────────────────────
 // Simple damped spring: returns [newValue, newVelocity]
